@@ -1,0 +1,7 @@
+{
+  "name": "Pastoral Visit Log",
+  "description": "A mobile-friendly web application for pastoral staff to log visit details efficiently. Features a clean UI for entering visitee name, date, time, and content.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

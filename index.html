@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>목회 심방 기록 비서</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
+  }
+}
+</script>
+    <style>
+        body { 
+            font-family: 'Noto Sans KR', sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+        }
+        input:focus, textarea:focus, select:focus { 
+            outline: none; 
+            border-color: #2563eb; 
+            box-shadow: 0 0 0 2px #dbeafe;
+        }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+
+        // 간단한 아이콘 컴포넌트 - 이모지로 대체
+        const Icon = ({ name, className = "", ...props }) => {
+            const iconMap = {
+                BookHeart: "📘", Cloud: "☁️", CloudOff: "🌫️", ShieldAlert: "🛡️",
+                Eye: "👁️", EyeOff: "🚫", RotateCcw: "↩️", Loader2: "⏳",
+                Send: "📤", RefreshCw: "🔄", HelpCircle: "❓", CheckCircle2: "✅",
+                Star: "⭐"
+            };
+            
+            return React.createElement('span', { 
+                className: `inline-block ${className}`, 
+                ...props 
+            }, iconMap[name] || "❓");
+        };
+
+        // --- Utility: Save to GAS ---
+        const saveVisitLog = async (data) => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.script) {
+                    window.google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        .processForm(data);
+                } else {
+                    console.warn('GAS not detected. Saving to LocalStorage.');
+                    try {
+                        const logs = JSON.parse(localStorage.getItem('visit_logs') || '[]');
+                        const newLog = {...data, id: Date.now(), timestamp: new Date().toISOString()};
+                        localStorage.setItem('visit_logs', JSON.stringify([newLog, ...logs]));
+                        setTimeout(() => resolve(newLog), 800);
+                    } catch (error) {
+                        console.error('LocalStorage 저장 오류:', error);
+                        reject(error);
+                    }
+                }
+            });
+        };
+
+        const getVisitLogs = async () => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.script) {
+                    window.google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        .getVisitLogs();
+                } else {
+                    try {
+                        const logsJson = localStorage.getItem('visit_logs');
+                        const logs = logsJson ? JSON.parse(logsJson) : [];
+                        setTimeout(() => resolve(logs), 500);
+                    } catch (error) {
+                        console.error('LocalStorage 데이터 읽기 오류:', error);
+                        setTimeout(() => resolve([]), 500);
+                    }
+                }
+            });
+        };
+
+        // --- Components ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('write');
+            const [status, setStatus] = useState('IDLE');
+            const [isConnected, setIsConnected] = useState(false);
+            const [showPrivate, setShowPrivate] = useState(false);
+            const [logs, setLogs] = useState([]);
+            
+            const [formData, setFormData] = useState({
+                visiteeName: '', 
+                visitDate: '', 
+                visitTime: '', 
+                visitType: '구역심방',
+                content: '', 
+                privateNote: '', 
+                faithLevel: 3, 
+                interests: []
+            });
+
+            useEffect(() => {
+                console.log("App initialized successfully");
+                
+                if (window.google && window.google.script) {
+                    setIsConnected(true);
+                }
+                
+                const now = new Date();
+                setFormData(prev => ({ 
+                    ...prev, 
+                    visitDate: now.toISOString().split('T')[0], 
+                    visitTime: now.toTimeString().slice(0, 5) 
+                }));
+            }, []);
+
+            const handleToggleInterest = (tag) => {
+                setFormData(prev => ({
+                    ...prev,
+                    interests: prev.interests.includes(tag) 
+                        ? prev.interests.filter(t => t !== tag) 
+                        : [...prev.interests, tag]
+                }));
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!formData.visiteeName.trim()) {
+                    alert("성도 이름을 입력하세요.");
+                    return;
+                }
+                
+                setStatus('LOADING');
+                try {
+                    await saveVisitLog(formData);
+                    setStatus('SUCCESS');
+                    setFormData(prev => ({
+                        ...prev, 
+                        visiteeName: '', 
+                        content: '', 
+                        privateNote: '', 
+                        interests: []
+                    }));
+                } catch (err) {
+                    setStatus('ERROR');
+                    alert("저장 실패: " + err);
+                }
+            };
+
+            const refreshHistory = async () => {
+                setStatus('LOADING_HISTORY');
+                try {
+                    const data = await getVisitLogs();
+                    setLogs(Array.isArray(data) ? data : []);
+                } catch (error) {
+                    console.error('기록 불러오기 오류:', error);
+                    setLogs([]);
+                } finally {
+                    setStatus('IDLE');
+                }
+            };
+
+            useEffect(() => {
+                if (activeTab === 'history') {
+                    refreshHistory();
+                }
+            }, [activeTab]);
+
+            const resetForm = () => {
+                if (window.confirm('모든 입력 내용을 지울까요?')) {
+                    const now = new Date();
+                    setFormData({
+                        visiteeName: '', 
+                        visitDate: now.toISOString().split('T')[0], 
+                        visitTime: now.toTimeString().slice(0, 5),
+                        visitType: '구역심방',
+                        content: '', 
+                        privateNote: '', 
+                        faithLevel: 3, 
+                        interests: []
+                    });
+                }
+            };
+
+            // React Fragment 오류를 피하기 위해 div로 감싸기
+            const createButtonContent = () => {
+                if (status === 'LOADING') {
+                    return React.createElement('div', { className: "flex items-center justify-center gap-2" },
+                        React.createElement(Icon, { name: "Loader2", className: "w-6 h-6 animate-spin" })
+                    );
+                } else {
+                    return React.createElement('div', { className: "flex items-center justify-center gap-2" },
+                        React.createElement(Icon, { name: "Send", className: "w-5 h-5" }),
+                        "시트에 기록 저장"
+                    );
+                }
+            };
+
+            return React.createElement('div', { className: "min-h-screen bg-gray-50 flex flex-col pb-32" },
+                // Header
+                React.createElement('header', { className: "bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50 h-16" },
+                    React.createElement('div', { className: "max-w-md mx-auto px-4 h-full flex items-center justify-between" },
+                        React.createElement('div', { className: "flex items-center gap-2 text-blue-700" },
+                            React.createElement(Icon, { name: "BookHeart", className: "w-6 h-6" }),
+                            React.createElement('h1', { className: "text-lg font-bold" }, "목회 심방 기록 비서")
+                        ),
+                        React.createElement('div', { className: `flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${isConnected ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-400'}` },
+                            isConnected ? React.createElement(Icon, { name: "Cloud", className: "w-3 h-3" }) : React.createElement(Icon, { name: "CloudOff", className: "w-3 h-3" }),
+                            isConnected ? "연결됨" : "로컬"
+                        )
+                    )
+                ),
+
+                React.createElement('main', { className: "max-w-md mx-auto w-full px-4 mt-6 flex-1" },
+                    // Tab Navigation
+                    React.createElement('div', { className: "bg-white p-1 rounded-xl shadow-sm border border-gray-200 flex mb-6 sticky top-20 z-40" },
+                        ['write', 'history', 'guide'].map(tab => 
+                            React.createElement('button', {
+                                key: tab,
+                                onClick: () => setActiveTab(tab),
+                                className: `flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === tab ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`
+                            }, 
+                            tab === 'write' ? '기록' : tab === 'history' ? '내역' : '안내')
+                        )
+                    ),
+
+                    activeTab === 'write' ? 
+                    React.createElement('form', { onSubmit: handleSubmit, className: "space-y-6 animate-fade-in" },
+                        // Section 1: Basic
+                        React.createElement('div', { className: "bg-white p-5 rounded-2xl shadow-sm border border-gray-100" },
+                            React.createElement('div', { className: "flex items-center gap-2 mb-4 text-blue-600 border-b border-gray-50 pb-2" },
+                                React.createElement('div', { className: "flex items-center gap-2" },
+                                    React.createElement('span', { className: "text-lg" }, "👤"),
+                                    React.createElement('h3', { className: "font-bold" }, "1. 기본 정보")
+                                )
+                            ),
+                            React.createElement('div', { className: "space-y-4" },
+                                React.createElement('input', {
+                                    className: "w-full rounded-lg border-gray-300 border p-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                                    placeholder: "성도 이름 *",
+                                    value: formData.visiteeName,
+                                    onChange: e => setFormData({...formData, visiteeName: e.target.value}),
+                                    required: true
+                                }),
+                                React.createElement('div', { className: "grid grid-cols-2 gap-3" },
+                                    React.createElement('input', { 
+                                        type: "date", 
+                                        className: "w-full rounded-lg border-gray-300 border p-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100", 
+                                        value: formData.visitDate, 
+                                        onChange: e => setFormData({...formData, visitDate: e.target.value}) 
+                                    }),
+                                    React.createElement('input', { 
+                                        type: "time", 
+                                        className: "w-full rounded-lg border-gray-300 border p-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100", 
+                                        value: formData.visitTime, 
+                                        onChange: e => setFormData({...formData, visitTime: e.target.value}) 
+                                    })
+                                )
+                            )
+                        ),
+
+                        // Section 2: Content
+                        React.createElement('div', { className: "bg-white p-5 rounded-2xl shadow-sm border border-gray-100" },
+                            React.createElement('div', { className: "flex items-center justify-between mb-4 border-b border-gray-50 pb-2" },
+                                React.createElement('div', { className: "flex items-center gap-2 text-blue-600" },
+                                    React.createElement('span', { className: "text-lg" }, "📖"),
+                                    React.createElement('h3', { className: "font-bold" }, "2. 심방 내용")
+                                )
+                            ),
+                            React.createElement('textarea', {
+                                className: "w-full rounded-lg border-gray-300 border p-3 text-sm min-h-[150px] focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+                                placeholder: "나눈 말씀과 기도제목을 기록하세요.",
+                                value: formData.content,
+                                onChange: e => setFormData({...formData, content: e.target.value})
+                            })
+                        ),
+
+                        // Section 3: Faith Level
+                        React.createElement('div', { className: "bg-white p-5 rounded-2xl shadow-sm border border-gray-100" },
+                            React.createElement('div', { className: "flex items-center gap-2 mb-4 text-blue-600 border-b border-gray-50 pb-2" },
+                                React.createElement('span', { className: "text-lg" }, "⭐"),
+                                React.createElement('h3', { className: "font-bold" }, "3. 영적 상태")
+                            ),
+                            React.createElement('div', { className: "flex gap-2 justify-center mb-4" },
+                                [1, 2, 3, 4, 5].map(v => 
+                                    React.createElement('button', {
+                                        key: v, type: "button",
+                                        onClick: () => setFormData({...formData, faithLevel: v}),
+                                        className: `w-10 h-10 rounded-lg flex items-center justify-center transition-all ${formData.faithLevel >= v ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-50 text-gray-300'}`
+                                    }, React.createElement(Icon, { name: "Star", className: `w-6 h-6 ${formData.faithLevel >= v ? 'text-yellow-500' : 'text-gray-300'}` }))
+                                )
+                            ),
+                            React.createElement('div', { className: "flex flex-wrap gap-2" },
+                                ['건강', '자녀', '재정', '관계', '헌신'].map(tag => 
+                                    React.createElement('button', {
+                                        key: tag, type: "button",
+                                        onClick: () => handleToggleInterest(tag),
+                                        className: `px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${formData.interests.includes(tag) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-500 border-gray-200'}`
+                                    }, `#${tag}`)
+                                )
+                            )
+                        ),
+
+                        // Section 4: Sensitive Note
+                        React.createElement('div', { className: "bg-white p-5 rounded-2xl shadow-sm border border-red-50" },
+                            React.createElement('div', { className: "flex items-center justify-between mb-4 border-b border-red-50 pb-2 text-red-600" },
+                                React.createElement('div', { className: "flex items-center gap-2" },
+                                    React.createElement(Icon, { name: "ShieldAlert", className: "w-5 h-5" }),
+                                    React.createElement('h3', { className: "font-bold" }, "4. 민감 정보")
+                                ),
+                                React.createElement('button', { 
+                                    type: "button", 
+                                    onClick: () => setShowPrivate(!showPrivate),
+                                    className: "p-1 hover:bg-red-50 rounded-md"
+                                },
+                                    showPrivate ? React.createElement(Icon, { name: "EyeOff", className: "w-5 h-5" }) : React.createElement(Icon, { name: "Eye", className: "w-5 h-5" })
+                                )
+                            ),
+                            showPrivate ? 
+                                React.createElement('textarea', {
+                                    className: "w-full p-3 text-sm border border-red-200 rounded-lg bg-red-50/20 focus:border-red-500 focus:ring-2 focus:ring-red-100",
+                                    placeholder: "보안이 필요한 메모를 작성하세요.",
+                                    value: formData.privateNote,
+                                    onChange: e => setFormData({...formData, privateNote: e.target.value})
+                                }) :
+                                React.createElement('div', { className: "py-4 text-center text-gray-400 text-xs" }, "잠금 아이콘을 눌러 메모를 작성하세요.")
+                        ),
+
+                        // Bottom Actions
+                        React.createElement('div', { className: "fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-md border-t border-gray-200 z-50 safe-bottom shadow-lg" },
+                            React.createElement('div', { className: "max-w-md mx-auto flex gap-3" },
+                                React.createElement('button', {
+                                    type: "button",
+                                    onClick: resetForm,
+                                    className: "p-4 bg-gray-100 rounded-2xl text-gray-500 active:scale-95 hover:bg-gray-200 transition-colors"
+                                }, React.createElement(Icon, { name: "RotateCcw", className: "w-6 h-6" })),
+                                React.createElement('button', {
+                                    type: "submit",
+                                    disabled: status === 'LOADING',
+                                    className: "flex-1 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+                                }, createButtonContent())
+                            )
+                        )
+                    ) : 
+                    activeTab === 'history' ? 
+                    React.createElement('div', { className: "space-y-4 animate-fade-in pb-20" },
+                        React.createElement('div', { className: "flex justify-between items-center mb-2" },
+                            React.createElement('h2', { className: "font-bold text-gray-700" }, "최근 심방 기록"),
+                            React.createElement('button', { 
+                                onClick: refreshHistory, 
+                                className: `p-2 text-blue-600 hover:bg-blue-50 rounded-lg ${status === 'LOADING_HISTORY' ? 'animate-spin' : ''}` 
+                            }, React.createElement(Icon, { name: "RefreshCw", className: "w-5 h-5" }))
+                        ),
+                        logs.length === 0 ? 
+                            React.createElement('div', { className: "py-20 text-center text-gray-400" }, 
+                                status === 'LOADING_HISTORY' ? "불러오는 중..." : "저장된 기록이 없습니다."
+                            ) :
+                            logs.map((log, i) => React.createElement('div', { 
+                                key: log.id || i, 
+                                className: "bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow" 
+                            },
+                                React.createElement('div', { className: "flex justify-between items-start mb-2" },
+                                    React.createElement('div', { className: "font-bold text-blue-700" }, log.visiteeName),
+                                    React.createElement('div', { className: "text-[10px] text-gray-400" }, log.visitDate)
+                                ),
+                                log.content ? 
+                                    React.createElement('div', { className: "text-sm text-gray-600 line-clamp-2" }, log.content) :
+                                    React.createElement('div', { className: "text-sm text-gray-400 italic" }, "내용 없음")
+                            ))
+                    ) :
+                    React.createElement('div', { className: "bg-white p-6 rounded-2xl border border-gray-200 animate-fade-in" },
+                        React.createElement('h3', { className: "font-bold text-blue-600 mb-4 flex items-center gap-2" }, 
+                            React.createElement(Icon, { name: "HelpCircle", className: "w-5 h-5" }), "사용 가이드"),
+                        React.createElement('div', { className: "space-y-4 text-sm text-gray-600" },
+                            React.createElement('p', null, "1. 성도 이름을 입력하고 심방 내용을 작성하세요."),
+                            React.createElement('p', null, "2. [시트 저장]을 누르면 구글 스프레드시트에 자동 기록됩니다."),
+                            React.createElement('p', null, "3. 민감한 정보는 4번 항목의 눈 아이콘을 눌러 안전하게 기록하세요."),
+                            React.createElement('div', { className: "p-4 bg-blue-50 rounded-xl text-blue-700 text-xs" }, 
+                                "Tip: 구글 앱스크립트와 연결하면 데이터가 클라우드에 안전하게 저장됩니다.")
+                        )
+                    )
+                ),
+
+                // Success Modal
+                status === 'SUCCESS' && React.createElement('div', { 
+                    className: "fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-fade-in" 
+                },
+                    React.createElement('div', { className: "bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl" },
+                        React.createElement(Icon, { name: "CheckCircle2", className: "w-16 h-16 text-green-500 mx-auto mb-4" }),
+                        React.createElement('h2', { className: "text-xl font-bold mb-2" }, "저장 완료!"),
+                        React.createElement('p', { className: "text-gray-500 text-sm mb-6" }, "기록이 안전하게 저장되었습니다."),
+                        React.createElement('button', {
+                            onClick: () => setStatus('IDLE'),
+                            className: "w-full bg-blue-600 text-white py-4 rounded-2xl font-bold hover:bg-blue-700 transition-colors"
+                        }, "확인")
+                    )
+                )
+            );
+        };
+
+        const container = document.getElementById('root');
+        const root = createRoot(container);
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
